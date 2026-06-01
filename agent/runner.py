@@ -19,7 +19,7 @@ from colorama import Fore, Style, init
 
 from auth.google_auth import get_gmail_service, get_calendar_service
 from agent.email_fetcher import fetch_inbox_emails
-from agent.email_classifier import classify_email
+from agent.email_classifier import classify_email, extract_bulk_events
 from agent import calendar_manager as cal
 from agent.notifier import send_summary
 
@@ -160,6 +160,12 @@ def run(max_emails: int = 50) -> None:
         subject = email["subject"]
         print(f"  Classifying: {subject[:70]}")
 
+        if subject.startswith("Calendar Agent:"):
+            bulk_changes = _handle_bulk_email(calendar, email, event_records)
+            changes.extend(bulk_changes)
+            processed_ids.add(email["id"])
+            continue
+
         try:
             result = classify_email(email)
         except Exception as exc:
@@ -276,6 +282,51 @@ def run_dedup() -> None:
         print(f"\n{Fore.GREEN}Done — removed {deleted_count} duplicate(s) across {dupes_found} event(s).{Style.RESET_ALL}")
 
     print(f"\n{Fore.CYAN}=== Done ==={Style.RESET_ALL}")
+
+
+def _handle_bulk_email(calendar_service, email: dict, event_records: dict) -> list[dict]:
+    """
+    Process a 'Calendar Agent:' command email — extract every event it lists
+    and create each one, applying the same duplicate detection as normal emails.
+    Returns a list of change dicts for the summary email.
+    """
+    print(f"  {Fore.MAGENTA}→ BULK: parsing events from command email...{Style.RESET_ALL}")
+
+    try:
+        events = extract_bulk_events(email)
+    except Exception as exc:
+        print(f"    {Fore.YELLOW}Could not parse bulk events: {exc}{Style.RESET_ALL}")
+        return []
+
+    if not events:
+        print(f"    {Fore.YELLOW}No events found in email.{Style.RESET_ALL}")
+        return []
+
+    print(f"    Found {len(events)} event(s) to create.")
+    changes = []
+
+    for i, event in enumerate(events):
+        title = event.get("title", "Untitled")
+        dt_str = event.get("start_datetime", "unknown date")
+        print(f"    [{i + 1}/{len(events)}] {title} — {dt_str}")
+
+        try:
+            change = _apply_action(calendar_service, "create", event, email)
+            if change:
+                changes.append(change)
+                event_records[f"{email['id']}:{i}"] = {
+                    "title": event.get("title", "Untitled"),
+                    "start_datetime": event.get("start_datetime", ""),
+                    "end_datetime": event.get("end_datetime") or "",
+                    "location": event.get("location") or "",
+                    "description": event.get("description") or "",
+                    "calendar_event_id": change["calendar_event_id"],
+                    "status": "active",
+                }
+        except Exception as exc:
+            print(f"      {Fore.YELLOW}Calendar error: {exc}{Style.RESET_ALL}")
+
+    return changes
 
 
 def _apply_action(calendar_service, action: str, event: dict, email: dict) -> dict | None:

@@ -100,6 +100,73 @@ CLASSIFY_TOOL = {
 }
 
 
+BULK_SYSTEM_PROMPT = """You are a calendar assistant. The user has sent an email to their calendar agent to create multiple events.
+
+Extract every event mentioned in the email body. For each event:
+- Make the title short and descriptive
+- Express datetimes in ISO 8601 format: "2026-06-07T18:00:00" for timed events or "2026-06-07" for all-day
+- If a year is not given, infer the most plausible upcoming date based on the email's date
+- Include location and description only if explicitly mentioned"""
+
+BULK_EXTRACT_TOOL = {
+    "name": "extract_events",
+    "description": "Extract all calendar events from the email.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "events": {
+                "type": "array",
+                "description": "List of events to create.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Short event title."},
+                        "start_datetime": {"type": "string", "description": "ISO 8601 start datetime or date."},
+                        "end_datetime": {"type": "string", "description": "ISO 8601 end datetime, if known."},
+                        "location": {"type": "string", "description": "Venue or address, if mentioned."},
+                        "description": {"type": "string", "description": "Any extra notes."},
+                    },
+                    "required": ["title", "start_datetime"],
+                },
+            }
+        },
+        "required": ["events"],
+    },
+}
+
+
+def extract_bulk_events(email: dict) -> list[dict]:
+    """
+    Parse a 'Calendar Agent:' command email and return a list of event dicts.
+    Each dict has the same shape as the 'event' field from classify_email.
+    """
+    client = get_client()
+
+    MAX_BODY = 6000
+    body = email.get("body", "") or email.get("snippet", "")
+    if len(body) > MAX_BODY:
+        body = body[:MAX_BODY] + "\n\n[... email truncated ...]"
+
+    user_content = (
+        f"From: {email['sender']}\n"
+        f"Date: {email['date']}\n"
+        f"Subject: {email['subject']}\n\n"
+        f"{body}"
+    )
+
+    response = client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=2048,
+        system=BULK_SYSTEM_PROMPT,
+        tools=[BULK_EXTRACT_TOOL],
+        tool_choice={"type": "tool", "name": "extract_events"},
+        messages=[{"role": "user", "content": user_content}],
+    )
+
+    tool_block = next(b for b in response.content if b.type == "tool_use")
+    return tool_block.input.get("events", [])
+
+
 def classify_email(email: dict) -> dict:
     """
     Send one email to Claude for classification.
