@@ -13,6 +13,7 @@ Flow:
 
 import json
 import os
+from datetime import datetime, date
 from pathlib import Path
 
 from colorama import Fore, Style, init
@@ -335,6 +336,17 @@ def _apply_action(calendar_service, action: str, event: dict, email: dict) -> di
 
     if action == "create":
         start_dt = cal._parse_dt(event.get("start_datetime", ""))
+
+        if start_dt is not None:
+            if cal._is_date_only(start_dt):
+                if start_dt < date.today():
+                    print(f"    {Fore.YELLOW}Skipped (past date): {title} was on {start_dt}{Style.RESET_ALL}")
+                    return None
+            else:
+                start_naive = start_dt.replace(tzinfo=None) if start_dt.tzinfo else start_dt
+                if start_naive < datetime.utcnow():
+                    print(f"    {Fore.YELLOW}Skipped (past date): {title} was on {start_dt}{Style.RESET_ALL}")
+                    return None
 
         # Check by title first, then fall back to checking by start time (catches
         # same reservation sent as two confirmation emails with different subjects)
