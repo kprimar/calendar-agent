@@ -13,10 +13,18 @@ Flow:
 
 import json
 import os
+import sys
 from datetime import datetime, date
 from pathlib import Path
 
 from colorama import Fore, Style, init
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Ensure UTF-8 output on Windows regardless of console encoding
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from auth.google_auth import get_gmail_service, get_calendar_service
 from agent.email_fetcher import fetch_inbox_emails
