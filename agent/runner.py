@@ -86,6 +86,12 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
 
         existing = cal.get_event(calendar_service, cal_event_id) if cal_event_id else None
 
+        # Ghost record: event exists in API but has no usable data — can't be edited
+        if existing is not None and not existing.get("summary") and not existing.get("organizer"):
+            print(f"  {Fore.YELLOW}Skipping {title} — event is a ghost record (deleted or from a read-only calendar). Removing from tracking.{Style.RESET_ALL}")
+            record["status"] = "cancelled"
+            continue
+
         if existing is None:
             print(f"  {Fore.YELLOW}Missing: {title} — recreating...{Style.RESET_ALL}")
             try:

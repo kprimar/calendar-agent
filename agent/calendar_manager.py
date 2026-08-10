@@ -9,6 +9,15 @@ from typing import Optional
 
 TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "America/New_York")
 
+# New events always go to this calendar (Personal)
+CREATE_CALENDAR_ID = os.getenv("CREATE_CALENDAR_ID", "primary")
+
+# All calendars the agent can read, update, and delete on
+_managed_raw = os.getenv("MANAGED_CALENDAR_IDS", CREATE_CALENDAR_ID)
+MANAGED_CALENDAR_IDS = list(dict.fromkeys(
+    c.strip() for c in _managed_raw.split(",") if c.strip()
+))
+
 
 def _parse_dt(dt_str: str):
     """Parse ISO 8601 string into datetime or date. Returns None on failure."""
@@ -69,18 +78,31 @@ def _build_event_body(event_details: dict) -> dict:
     return body
 
 
+def _find_calendar_for_event(calendar_service, event_id: str) -> Optional[str]:
+    """Return the calendar ID that owns this event, or None if not found."""
+    for cal_id in MANAGED_CALENDAR_IDS:
+        try:
+            calendar_service.events().get(calendarId=cal_id, eventId=event_id).execute()
+            return cal_id
+        except Exception:
+            continue
+    return None
+
+
 def create_event(calendar_service, event_details: dict) -> dict:
-    """Insert a new event on the primary calendar. Returns the created event."""
+    """Insert a new event on the Personal calendar. Returns the created event."""
     body = _build_event_body(event_details)
-    return calendar_service.events().insert(calendarId="primary", body=body).execute()
+    return calendar_service.events().insert(calendarId=CREATE_CALENDAR_ID, body=body).execute()
 
 
 def get_event(calendar_service, event_id: str) -> Optional[dict]:
-    """Fetch a single event by ID. Returns None if not found or deleted."""
-    try:
-        return calendar_service.events().get(calendarId="primary", eventId=event_id).execute()
-    except Exception:
-        return None
+    """Fetch a single event by ID across all managed calendars. Returns None if not found."""
+    for cal_id in MANAGED_CALENDAR_IDS:
+        try:
+            return calendar_service.events().get(calendarId=cal_id, eventId=event_id).execute()
+        except Exception:
+            continue
+    return None
 
 
 def find_agent_events_at_time(calendar_service, around_dt) -> list:
@@ -96,24 +118,27 @@ def find_agent_events_at_time(calendar_service, around_dt) -> list:
     time_min = (base - timedelta(hours=1)).isoformat() + "Z"
     time_max = (base + timedelta(hours=1)).isoformat() + "Z"
 
-    results = calendar_service.events().list(
-        calendarId="primary",
-        timeMin=time_min,
-        timeMax=time_max,
-        privateExtendedProperty="created_by=calendar-agent",
-        singleEvents=True,
-        orderBy="startTime",
-        maxResults=25,
-    ).execute()
-
-    return results.get("items", [])
+    results = []
+    seen = set()
+    for cal_id in MANAGED_CALENDAR_IDS:
+        resp = calendar_service.events().list(
+            calendarId=cal_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            privateExtendedProperty="created_by=calendar-agent",
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=25,
+        ).execute()
+        for e in resp.get("items", []):
+            if e["id"] not in seen:
+                seen.add(e["id"])
+                results.append(e)
+    return results
 
 
 def find_all_events(calendar_service, title: str, around_dt=None) -> list:
-    """
-    Return all calendar events matching title near around_dt.
-    Same search window as find_event, but returns every match.
-    """
+    """Return all events matching title across all managed calendars near around_dt."""
     now = datetime.utcnow()
 
     if around_dt is not None:
@@ -127,99 +152,77 @@ def find_all_events(calendar_service, title: str, around_dt=None) -> list:
         time_min = now.isoformat() + "Z"
         time_max = (now + timedelta(days=365)).isoformat() + "Z"
 
-    results = calendar_service.events().list(
-        calendarId="primary",
-        q=title,
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True,
-        orderBy="startTime",
-        maxResults=25,
-    ).execute()
-
     title_lower = title.lower()
-    return [e for e in results.get("items", []) if title_lower in e.get("summary", "").lower()]
+    results = []
+    seen = set()
+    for cal_id in MANAGED_CALENDAR_IDS:
+        resp = calendar_service.events().list(
+            calendarId=cal_id,
+            q=title,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=25,
+        ).execute()
+        for e in resp.get("items", []):
+            if e["id"] not in seen and title_lower in e.get("summary", "").lower():
+                seen.add(e["id"])
+                results.append(e)
+    return results
 
 
 def find_event(calendar_service, title: str, around_dt=None) -> Optional[dict]:
-    """
-    Search the primary calendar for an event matching title.
-    If around_dt is provided, search within ±1 day of that date.
-    Otherwise search the next 365 days.
-    """
-    now = datetime.utcnow()
-
-    if around_dt is not None:
-        if _is_date_only(around_dt):
-            base = datetime(around_dt.year, around_dt.month, around_dt.day)
-        else:
-            base = around_dt.replace(tzinfo=None) if around_dt.tzinfo else around_dt
-        time_min = (base - timedelta(days=1)).isoformat() + "Z"
-        time_max = (base + timedelta(days=1)).isoformat() + "Z"
-    else:
-        time_min = now.isoformat() + "Z"
-        time_max = (now + timedelta(days=365)).isoformat() + "Z"
-
-    results = calendar_service.events().list(
-        calendarId="primary",
-        q=title,
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True,
-        orderBy="startTime",
-        maxResults=5,
-    ).execute()
-
-    items = results.get("items", [])
-    if not items:
-        return None
-
-    # Return the first match (most likely)
-    title_lower = title.lower()
-    for item in items:
-        if title_lower in item.get("summary", "").lower():
-            return item
-    return items[0]
+    """Search all managed calendars for an event matching title. Returns first match."""
+    matches = find_all_events(calendar_service, title, around_dt)
+    return matches[0] if matches else None
 
 
 def list_all_events(calendar_service, days_back: int = 30, days_forward: int = 365) -> list:
-    """Fetch all events on the primary calendar within the given window, handling pagination."""
+    """Fetch all events across all managed calendars within the given window."""
     now = datetime.utcnow()
     time_min = (now - timedelta(days=days_back)).isoformat() + "Z"
     time_max = (now + timedelta(days=days_forward)).isoformat() + "Z"
 
     events = []
-    page_token = None
-    while True:
-        resp = calendar_service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=250,
-            pageToken=page_token,
-        ).execute()
-        events.extend(resp.get("items", []))
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
+    seen = set()
+    for cal_id in MANAGED_CALENDAR_IDS:
+        page_token = None
+        while True:
+            resp = calendar_service.events().list(
+                calendarId=cal_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=250,
+                pageToken=page_token,
+            ).execute()
+            for e in resp.get("items", []):
+                if e["id"] not in seen:
+                    seen.add(e["id"])
+                    events.append(e)
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
     return events
 
 
 def update_event(calendar_service, event_id: str, event_details: dict) -> dict:
-    """Update an existing calendar event with new details. Returns the updated event."""
+    """Update an existing event on whichever managed calendar owns it."""
     body = _build_event_body(event_details)
+    cal_id = _find_calendar_for_event(calendar_service, event_id) or CREATE_CALENDAR_ID
     return calendar_service.events().update(
-        calendarId="primary",
+        calendarId=cal_id,
         eventId=event_id,
         body=body,
     ).execute()
 
 
 def delete_event(calendar_service, event_id: str) -> None:
-    """Delete a calendar event by ID."""
+    """Delete an event from whichever managed calendar owns it."""
+    cal_id = _find_calendar_for_event(calendar_service, event_id) or CREATE_CALENDAR_ID
     calendar_service.events().delete(
-        calendarId="primary",
+        calendarId=cal_id,
         eventId=event_id,
     ).execute()

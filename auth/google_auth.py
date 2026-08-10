@@ -58,12 +58,16 @@ def get_credentials() -> Credentials:
             print(f"{Fore.CYAN}Refreshing expired token...")
             creds.refresh(Request())
         else:
-            print(f"{Fore.CYAN}Opening browser for Google sign-in...")
+            print(f"{Fore.CYAN}Starting Google sign-in...")
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(CREDENTIALS_FILE), SCOPES
             )
-            # port=0 lets the OS pick a free port — avoids conflicts on Windows
-            creds = flow.run_local_server(port=0)
+            print(f"\n{Fore.YELLOW}Copy the URL below into your browser:{Style.RESET_ALL}\n")
+            creds = flow.run_local_server(
+                port=0,
+                open_browser=False,
+                authorization_prompt_message="  {url}\n",
+            )
 
         TOKEN_FILE.write_text(creds.to_json())
         print(f"{Fore.GREEN}Token saved to {TOKEN_FILE}")
