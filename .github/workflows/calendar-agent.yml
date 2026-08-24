@@ -29,8 +29,13 @@ jobs:
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: |
           mkdir -p credentials
-          echo "$GMAIL_CREDENTIALS_JSON" > credentials/credentials.json
-          echo "$GMAIL_TOKEN_JSON" > credentials/token.json
+          python3 << 'PYEOF'
+          import os, json
+          for var, path in [('GMAIL_CREDENTIALS_JSON', 'credentials/credentials.json'),
+                            ('GMAIL_TOKEN_JSON', 'credentials/token.json')]:
+              raw = os.environ[var].lstrip('﻿')
+              json.dump(json.loads(raw), open(path, 'w'))
+          PYEOF
 
       - name: Run agent
         env:
