@@ -10,6 +10,7 @@ import os
 import json
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -56,8 +57,12 @@ def get_credentials() -> Credentials:
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             print(f"{Fore.CYAN}Refreshing expired token...")
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                print(f"{Fore.YELLOW}Refresh token revoked or expired — re-authenticating...")
+                creds = None
+        if not creds or not creds.valid:
             print(f"{Fore.CYAN}Starting Google sign-in...")
             flow = InstalledAppFlow.from_client_secrets_file(
                 str(CREDENTIALS_FILE), SCOPES
