@@ -219,10 +219,10 @@ def list_all_events(calendar_service, days_back: int = 30, days_forward: int = 3
 
 
 def update_event(calendar_service, event_id: str, event_details: dict) -> dict:
-    """Update an existing event on whichever managed calendar owns it."""
+    """Patch an existing event, touching only the fields the agent owns."""
     body = _build_event_body(event_details)
     cal_id = _find_calendar_for_event(calendar_service, event_id) or CREATE_CALENDAR_ID
-    return calendar_service.events().update(
+    return calendar_service.events().patch(
         calendarId=cal_id,
         eventId=event_id,
         body=body,
