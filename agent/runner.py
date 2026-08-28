@@ -90,7 +90,11 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
         title = record.get("title", "Untitled")
         cal_event_id = record.get("calendar_event_id")
 
-        existing = cal.get_event(calendar_service, cal_event_id) if cal_event_id else None
+        try:
+            existing = cal.get_event(calendar_service, cal_event_id) if cal_event_id else None
+        except Exception as exc:
+            print(f"  {Fore.YELLOW}API error fetching {title} — skipping: {exc}{Style.RESET_ALL}")
+            continue
 
         # Ghost record: event exists in API but has no usable data — can't be edited
         if existing is not None and not existing.get("summary") and not existing.get("organizer"):

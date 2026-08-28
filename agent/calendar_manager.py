@@ -6,6 +6,12 @@ import os
 from datetime import datetime, timedelta, date
 from typing import Optional
 
+from googleapiclient.errors import HttpError
+
+
+def _is_not_found(exc: Exception) -> bool:
+    return isinstance(exc, HttpError) and exc.resp.status == 404
+
 
 TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "America/New_York")
 
@@ -84,8 +90,10 @@ def _find_calendar_for_event(calendar_service, event_id: str) -> Optional[str]:
         try:
             calendar_service.events().get(calendarId=cal_id, eventId=event_id).execute()
             return cal_id
-        except Exception:
-            continue
+        except Exception as exc:
+            if _is_not_found(exc):
+                continue
+            raise
     return None
 
 
@@ -100,8 +108,10 @@ def get_event(calendar_service, event_id: str) -> Optional[dict]:
     for cal_id in MANAGED_CALENDAR_IDS:
         try:
             return calendar_service.events().get(calendarId=cal_id, eventId=event_id).execute()
-        except Exception:
-            continue
+        except Exception as exc:
+            if _is_not_found(exc):
+                continue
+            raise
     return None
 
 
