@@ -197,6 +197,10 @@ def run(max_emails: int = 50) -> None:
             processed_ids.add(email["id"])
             continue
 
+        if subject.startswith("Calendar Agent Summary"):
+            processed_ids.add(email["id"])
+            continue
+
         try:
             result = classify_email(email)
         except Exception as exc:
@@ -220,7 +224,7 @@ def run(max_emails: int = 50) -> None:
             change = _apply_action(calendar, action, event, email)
             if change:
                 changes.append(change)
-                if action == "create":
+                if action in ("create", "reschedule") and "calendar_event_id" in change:
                     event_records[email["id"]] = {
                         "title": event.get("title", "Untitled"),
                         "start_datetime": event.get("start_datetime", ""),
@@ -471,6 +475,7 @@ def _apply_action(calendar_service, action: str, event: dict, email: dict) -> di
                 "event_title": title,
                 "event_datetime": dt_str,
                 "detail": "Rescheduled (no prior event found — created as new)",
+                "calendar_event_id": created["id"],
             }
 
     return None

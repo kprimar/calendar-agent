@@ -12,3 +12,8 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# Debug / scratch output
+*.bin
+run_output.txt
+verify_run.txt
