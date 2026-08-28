@@ -234,6 +234,17 @@ def run(max_emails: int = 50) -> None:
                         "calendar_event_id": change["calendar_event_id"],
                         "status": "active",
                     }
+                elif action == "reschedule" and "rescheduled_calendar_event_id" in change:
+                    # Reschedule updated an existing tracked event — sync the stored
+                    # record so reconciliation doesn't fight the new time/details.
+                    rescheduled_id = change["rescheduled_calendar_event_id"]
+                    for rec in event_records.values():
+                        if rec.get("calendar_event_id") == rescheduled_id:
+                            rec["title"] = event.get("title", rec["title"])
+                            rec["start_datetime"] = event.get("start_datetime", rec["start_datetime"])
+                            rec["end_datetime"] = event.get("end_datetime") or rec.get("end_datetime", "")
+                            rec["location"] = event.get("location") or rec.get("location", "")
+                            break
                 elif action == "cancel":
                     # Mark the matching stored record as cancelled so reconciliation
                     # won't recreate it. Match by calendar event ID (reliable) first,
@@ -463,6 +474,7 @@ def _apply_action(calendar_service, action: str, event: dict, email: dict) -> di
                 "event_title": title,
                 "event_datetime": dt_str,
                 "detail": f"Rescheduled from {old_dt_str}",
+                "rescheduled_calendar_event_id": existing["id"],
             }
         else:
             # No existing event found — create it instead
