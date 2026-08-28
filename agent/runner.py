@@ -231,15 +231,26 @@ def run(max_emails: int = 50) -> None:
                         "status": "active",
                     }
                 elif action == "cancel":
-                    # Mark the matching create record as cancelled so reconciliation won't restore it
-                    title = event.get("title", "").lower()
-                    event_date = (event.get("old_start_datetime") or event.get("start_datetime", ""))[:10]
-                    for rec in event_records.values():
-                        if (rec.get("status") == "active"
-                                and rec.get("title", "").lower() == title
-                                and rec.get("start_datetime", "")[:10] == event_date):
-                            rec["status"] = "cancelled"
-                            break
+                    # Mark the matching stored record as cancelled so reconciliation
+                    # won't recreate it. Match by calendar event ID (reliable) first,
+                    # falling back to title+date (fragile but better than nothing).
+                    deleted_id = change.get("deleted_calendar_event_id")
+                    matched = False
+                    if deleted_id:
+                        for rec in event_records.values():
+                            if rec.get("calendar_event_id") == deleted_id:
+                                rec["status"] = "cancelled"
+                                matched = True
+                                break
+                    if not matched:
+                        cancel_title = event.get("title", "").lower()
+                        event_date = (event.get("old_start_datetime") or event.get("start_datetime", ""))[:10]
+                        for rec in event_records.values():
+                            if (rec.get("status") == "active"
+                                    and rec.get("title", "").lower() == cancel_title
+                                    and rec.get("start_datetime", "")[:10] == event_date):
+                                rec["status"] = "cancelled"
+                                break
         except Exception as exc:
             print(f"    {Fore.YELLOW}Calendar error: {exc}{Style.RESET_ALL}")
 
@@ -422,6 +433,7 @@ def _apply_action(calendar_service, action: str, event: dict, email: dict) -> di
                 "event_title": title,
                 "event_datetime": dt_str,
                 "detail": "Event removed from calendar",
+                "deleted_calendar_event_id": existing["id"],
             }
         else:
             print(f"    {Fore.YELLOW}No matching event found to cancel.{Style.RESET_ALL}")
