@@ -54,7 +54,8 @@ def _format_datetime(event_details: dict) -> str:
 
 
 def _datetimes_match(stored: str, calendar_str: str) -> bool:
-    """True if two ISO datetime strings represent the same date/time, ignoring timezone."""
+    """True if two ISO datetime strings represent the same moment in time."""
+    from datetime import timezone as _tz
     a = cal._parse_dt(stored)
     b = cal._parse_dt(calendar_str)
     if a is None or b is None:
@@ -63,6 +64,11 @@ def _datetimes_match(stored: str, calendar_str: str) -> bool:
         a_date = a if cal._is_date_only(a) else a.date()
         b_date = b if cal._is_date_only(b) else b.date()
         return a_date == b_date
+    # When both are tz-aware, compare as moments in time (UTC).
+    # Stripping tzinfo would make "14:00Z" and "10:00-04:00" look different
+    # even though they are the same instant — causing a perpetual update loop.
+    if a.tzinfo is not None and b.tzinfo is not None:
+        return a.astimezone(_tz.utc) == b.astimezone(_tz.utc)
     return a.replace(tzinfo=None) == b.replace(tzinfo=None)
 
 
@@ -114,8 +120,8 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
         needs_update = False
         issues = []
 
-        cal_title = existing.get("summary", "")
-        if title.lower() != cal_title.lower():
+        cal_title = existing.get("summary", "").strip()
+        if title.strip().lower() != cal_title.lower():
             needs_update = True
             issues.append(f"title: expected \"{title}\", got \"{cal_title}\"")
 
@@ -126,8 +132,8 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
             needs_update = True
             issues.append(f"start: expected {stored_start}, got {cal_start_str}")
 
-        stored_location = record.get("location") or ""
-        cal_location = existing.get("location") or ""
+        stored_location = (record.get("location") or "").strip()
+        cal_location = (existing.get("location") or "").strip()
         if stored_location and stored_location.lower() != cal_location.lower():
             needs_update = True
             issues.append(f"location: expected \"{stored_location}\", got \"{cal_location}\"")
@@ -137,6 +143,12 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
             try:
                 updated = cal.update_event(calendar_service, existing["id"], record)
                 print(f"  {Fore.CYAN}Updated: {updated.get('htmlLink', '')}{Style.RESET_ALL}")
+                # Sync stored record to what the calendar now holds so the next
+                # reconciliation pass doesn't re-fire on the same stale values.
+                record["title"] = updated.get("summary", title)
+                updated_start = updated.get("start", {})
+                record["start_datetime"] = updated_start.get("dateTime") or updated_start.get("date", stored_start)
+                record["location"] = updated.get("location") or ""
                 changes.append({
                     "action": "update",
                     "email_subject": f"(corrected from prior email)",
