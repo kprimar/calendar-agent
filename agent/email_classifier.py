@@ -35,6 +35,8 @@ Analyze each email and classify it into exactly one of these actions:
   - Social notifications (likes, follows, comments)
   - Automated shipping/tracking updates
   - Any email where the user has NOT committed to being somewhere
+  - Reminder emails for an event that is already booked (e.g. "Your class is tomorrow", "Check-in is now open", "We look forward to seeing you", "Your upcoming appointment", "Don't forget your flight")
+  - Class or event schedule listings where nothing has changed — only classify as reschedule if the email explicitly says the date/time/location was MODIFIED or CHANGED
 
 When extracting event details:
   - Always express datetimes in ISO 8601 format: "2026-05-25T14:00:00" for timed events or "2026-05-25" for all-day

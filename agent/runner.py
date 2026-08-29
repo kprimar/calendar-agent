@@ -14,7 +14,7 @@ Flow:
 import json
 import os
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 
 from colorama import Fore, Style, init
@@ -89,6 +89,23 @@ def _reconcile_events(calendar_service, event_records: dict) -> list[dict]:
     for email_id, record in active.items():
         title = record.get("title", "Untitled")
         cal_event_id = record.get("calendar_event_id")
+
+        # Skip events whose start has already passed — nothing useful to reconcile
+        # and recreating deleted past events produces phantom calendar entries.
+        event_start = cal._parse_dt(record.get("start_datetime", ""))
+        if event_start is not None:
+            if cal._is_date_only(event_start):
+                if event_start < date.today():
+                    record["status"] = "archived"
+                    print(f"  {Fore.WHITE}Archived past event: {title}{Style.RESET_ALL}")
+                    continue
+            else:
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                start_utc = event_start.astimezone(timezone.utc).replace(tzinfo=None) if event_start.tzinfo else event_start
+                if start_utc < now_utc:
+                    record["status"] = "archived"
+                    print(f"  {Fore.WHITE}Archived past event: {title}{Style.RESET_ALL}")
+                    continue
 
         try:
             existing = cal.get_event(calendar_service, cal_event_id) if cal_event_id else None

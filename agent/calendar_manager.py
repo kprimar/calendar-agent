@@ -3,7 +3,7 @@ Google Calendar CRUD operations.
 """
 
 import os
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import Optional
 
 from googleapiclient.errors import HttpError
@@ -68,11 +68,26 @@ def _build_event_body(event_details: dict) -> dict:
             end_dt = start + timedelta(hours=1)
         else:
             end_dt = end
-        body = {
-            "summary": title,
-            "start": {"dateTime": start.isoformat(), "timeZone": TIMEZONE},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
-        }
+
+        if start.tzinfo is not None:
+            # Explicit UTC offset present — omit timeZone to avoid a PDT/PST
+            # conflict: including timeZone="America/Los_Angeles" alongside a
+            # "-07:00" offset in a PST-month event lets Google silently re-interpret
+            # the time by one hour, causing the reconciliation to re-fire on every run.
+            # A naive end_dt inherits the start's offset so the API gets a valid value.
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone(start.utcoffset()))
+            body = {
+                "summary": title,
+                "start": {"dateTime": start.isoformat()},
+                "end": {"dateTime": end_dt.isoformat()},
+            }
+        else:
+            body = {
+                "summary": title,
+                "start": {"dateTime": start.isoformat(), "timeZone": TIMEZONE},
+                "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
+            }
 
     if event_details.get("location"):
         body["location"] = event_details["location"]
